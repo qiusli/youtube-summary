@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+data/
+reports/
+config.toml
+.DS_Store

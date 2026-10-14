@@ -1,0 +1,19 @@
+#compdef youtube-summary yts
+
+local -a subcommands
+subcommands=(
+  'start:Keep running; email daily at send_time'
+  'once:Print summaries of new videos, no email'
+  'email:Summarize and email now'
+  'daily:Email at most once today, then exit'
+  'last:Show the last saved report'
+  'key:Save a YouTube Data API key to Keychain'
+  'config:Open config.toml'
+  'help:Show command help'
+)
+
+if (( CURRENT == 2 )); then
+  _describe 'command' subcommands
+else
+  _arguments '--config[Use a configuration file]:file:_files' '--no-color[Disable terminal colors]'
+fi

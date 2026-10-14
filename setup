@@ -1,0 +1,30 @@
+#!/bin/sh
+set -eu
+PROJECT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+cd "$PROJECT_DIR"
+PYTHON_BIN=${PYTHON_BIN:-python3}
+"$PYTHON_BIN" -c 'import sys; assert sys.version_info >= (3, 11), "Python 3.11+ required; set PYTHON_BIN to its path"'
+"$PYTHON_BIN" -m venv .venv
+.venv/bin/python -m pip install -q -r requirements.txt
+[ -f config.toml ] || cp config.example.toml config.toml
+
+CLI_DIR="$HOME/.local/bin"
+COMPLETION_DIR="$HOME/.zsh/completions"
+mkdir -p "$CLI_DIR" "$COMPLETION_DIR"
+link_command() {
+    source_path=$1
+    target_path=$2
+    if [ -L "$target_path" ] && [ "$(readlink "$target_path")" = "$source_path" ]; then
+        return
+    fi
+    if [ -e "$target_path" ] || [ -L "$target_path" ]; then
+        echo "Not replacing existing $target_path" >&2
+        return 1
+    fi
+    ln -s "$source_path" "$target_path"
+}
+link_command "$PROJECT_DIR/youtube-summary" "$CLI_DIR/youtube-summary"
+link_command "$PROJECT_DIR/youtube-summary" "$CLI_DIR/yts"
+link_command "$PROJECT_DIR/_youtube-summary" "$COMPLETION_DIR/_youtube-summary"
+link_command "$PROJECT_DIR/_youtube-summary" "$COMPLETION_DIR/_yts"
+echo 'Ready: youtube-summary start (or yts start)'

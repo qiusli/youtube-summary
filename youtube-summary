@@ -1,0 +1,36 @@
+#!/bin/sh
+set -eu
+
+SCRIPT_PATH=$0
+while [ -L "$SCRIPT_PATH" ]; do
+    SCRIPT_PATH=$(readlink "$SCRIPT_PATH")
+done
+PROJECT_DIR=$(CDPATH= cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd)
+PYTHON="$PROJECT_DIR/.venv/bin/python"
+if [ ! -x "$PYTHON" ]; then
+    echo "Run ./setup first to create the Python environment." >&2
+    exit 1
+fi
+run() { exec "$PYTHON" "$PROJECT_DIR/summary.py" "$@"; }
+
+case "${1:-start}" in
+    start) [ "$#" -gt 0 ] && shift; run --watch "$@" ;;
+    once)        shift; run --once "$@" ;;
+    email)       shift; run --email "$@" ;;
+    daily)       shift; run --daily "$@" ;;
+    last)        shift; run --last "$@" ;;
+    key)         shift; run --set-key "$@" ;;
+    config)      exec "${EDITOR:-open -t}" "$PROJECT_DIR/config.toml" ;;
+    help)
+        printf 'Usage: youtube-summary {start|once|email|daily|last|key|config|help}\n'
+        printf '  start        Keep running in this terminal; email daily at send_time\n'
+        printf '  once         Print summaries of new videos, no email\n'
+        printf '  email        Summarize and email now\n'
+        printf '  daily        Email at most once today, then exit\n'
+        printf '  last         Show the last saved report\n'
+        printf '  key          Save a YouTube Data API key to Keychain\n'
+        printf '  config       Open config.toml\n'
+        printf '  yts          Short alias for youtube-summary\n'
+        ;;
+    *) run "$@" ;;
+esac

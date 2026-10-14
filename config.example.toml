@@ -1,0 +1,36 @@
+# Channels: @handle, channel URL, or UC… channel ID.
+channels = [
+  # "@veritasium",
+  # "https://www.youtube.com/@lexfridman",
+]
+
+send_time = "07:00"                 # daily email, local time
+timezone = "America/Vancouver"
+model = "sonnet"                    # claude -p model: haiku | sonnet | opus
+summary_language = "the same language as the video"   # or a fixed language, e.g. "English"
+skip_shorts = true
+send_when_empty = false             # email even when there are no new videos
+first_run_hours = 24                # how far back the very first email looks
+max_lookback_days = 7               # catch-up limit after the Mac was off for days
+transcript_wait_hours = 24          # if Whisper also fails, wait this long before using the description
+transcript_languages = ["en"]       # preferred caption languages; any available language is the fallback
+whisper = true                      # no captions yet: download the audio and transcribe it locally
+whisper_model = "mlx-community/whisper-large-v3-turbo"
+whisper_max_minutes = 240           # longer videos wait for captions instead
+claude_path = ""                    # blank = find `claude` on PATH or in the Claude desktop app
+timeout_seconds = 300
+
+[youtube]
+# Leave as is: Keychain lookup names. Optional key; without it RSS/yt-dlp are used. Save one with: youtube-summary key
+keychain_service = "YouTube Data API"
+keychain_account = "youtube-summary"
+
+[email]
+sender_name = "YouTube Summary"     # name shown as the sender
+to = ""
+sender = ""
+host = "smtp.gmail.com"
+port = 587
+username = ""
+keychain_service = "Youtube Summary SMTP"
+keychain_account = ""
