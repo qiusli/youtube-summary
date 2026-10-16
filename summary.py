@@ -98,7 +98,9 @@ def validate(cfg):
         raise ValueError("No channels configured; add them to config.toml")
     send_time(cfg)
     ZoneInfo(cfg["timezone"])
-    for key in ("first_run_hours", "max_lookback_days", "transcript_wait_hours", "timeout_seconds", "whisper_max_minutes"):
+    cfg.setdefault("whisper_timeout_minutes", 60)
+    for key in ("first_run_hours", "max_lookback_days", "transcript_wait_hours", "timeout_seconds", "whisper_max_minutes",
+                "whisper_timeout_minutes"):
         if type(cfg[key]) is not int or cfg[key] < 0:
             raise ValueError(f"{key} must be a nonnegative integer")
 
@@ -385,6 +387,14 @@ def claude_summary(cfg, video, text, from_transcript):
     return {"summary": result["summary"], "key_points": [str(p) for p in result.get("key_points", [])]}
 
 
+WHISPER_CHILD = """
+import json, sys
+import mlx_whisper
+result = mlx_whisper.transcribe(sys.argv[1], path_or_hf_repo=sys.argv[2])
+print(json.dumps({"text": result["text"]}))
+"""
+
+
 def whisper_transcript(cfg, video):
     """Download the audio and transcribe it on this Mac. Return (text, None) or (None, reason)."""
     if not cfg["whisper"]:
@@ -395,8 +405,6 @@ def whisper_transcript(cfg, video):
     if not shutil.which("ffmpeg"):
         return None, "ffmpeg not installed"
     try:
-        os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
-        import mlx_whisper  # slow to import; only needed when captions are missing
         with tempfile.TemporaryDirectory() as folder:
             options = {"quiet": True, "no_warnings": True, "noprogress": True, "logger": QuietLogger(),
                        "format": "bestaudio[ext=m4a]/bestaudio", "outtmpl": f"{folder}/audio.%(ext)s"}
@@ -409,7 +417,14 @@ def whisper_transcript(cfg, video):
                         return None, MEMBERS_ONLY
                     raise
             audio = next(Path(folder).glob("audio.*"))
-            text = mlx_whisper.transcribe(str(audio), path_or_hf_repo=cfg["whisper_model"])["text"].strip()
+            # A child process: MLX keeps the model and GPU buffers until its process exits,
+            # which grew a long-running --watch process to 15 GB.
+            proc = subprocess.run([sys.executable, "-c", WHISPER_CHILD, str(audio), cfg["whisper_model"]],
+                                  capture_output=True, text=True, timeout=cfg["whisper_timeout_minutes"] * 60,
+                                  env={**os.environ, "HF_HUB_DISABLE_PROGRESS_BARS": "1"})
+            if proc.returncode:
+                return None, f"Whisper failed: {proc.stderr.strip().splitlines()[-1][:150] if proc.stderr.strip() else proc.returncode}"
+            text = json.loads(proc.stdout)["text"].strip()
         return (text[:MAX_TRANSCRIPT_CHARS], None) if text else (None, "no speech found")
     except Exception as exc:  # noqa: BLE001
         return None, f"Whisper: {type(exc).__name__}"

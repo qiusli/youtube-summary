@@ -17,6 +17,7 @@ transcript_languages = ["en"]       # preferred caption languages; any available
 whisper = true                      # no captions yet: download the audio and transcribe it locally
 whisper_model = "mlx-community/whisper-large-v3-turbo"
 whisper_max_minutes = 240           # longer videos wait for captions instead
+whisper_timeout_minutes = 60        # give up on a stuck transcription after this
 claude_path = ""                    # blank = find `claude` on PATH or in the Claude desktop app
 timeout_seconds = 300
 
