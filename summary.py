@@ -68,6 +68,12 @@ Traditional Chinese or Cantonese. Reply with ONLY the JSON object.
 - summary: 2-4 sentences on what the video is actually about and its main conclusion or argument.
 - key_points: 3-7 short bullet points with the concrete substance: claims, numbers, names, recommendations,
   predictions, and any dates mentioned. Skip intros, sponsor reads, calls to subscribe, and filler.
+State the video's views and claims directly, as plain statements, without attributing them to the speaker:
+write "Semiconductors are near long-term support", not "He thinks semiconductors are near support" or
+"The author says..."; in Chinese write "半导体处于长期支撑区", not "Andy认为…", "博主表示…" or "作者觉得…".
+Never refer to the video, speaker, host, author or channel at all: no "the video argues", "the author owns",
+"视频认为" or "作者持有". For the speaker's own trades or holdings, drop the subject: "Owns none of the
+neoclouds", "Buying quality AI names that have fallen", "未持有新云股", "正在买入回调的优质AI股".
 If you only have the description (no transcript), summarize what it says and do not invent content."""
 
 
