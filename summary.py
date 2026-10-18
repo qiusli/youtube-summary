@@ -49,6 +49,7 @@ CHANNEL_ID = re.compile(r"UC[\w-]{22}")
 MAX_TRANSCRIPT_CHARS = 300_000
 MEMBERS_ONLY = "members-only"
 CJK = re.compile(r"[\u3400-\u9fff]")
+CHINESE_CAPTIONS = ["zh-Hans", "zh-CN", "zh-SG", "zh", "zh-Hant", "zh-TW", "zh-HK"]
 
 SCHEMA = {
     "type": "object",
@@ -62,7 +63,8 @@ SCHEMA = {
 
 def system_prompt(language):
     return f"""You summarize YouTube videos for a busy reader who will not watch them.
-Write in {language}. Reply with ONLY the JSON object.
+Write in {language}. Write any Chinese in Simplified Chinese (简体中文), even if the transcript is in
+Traditional Chinese or Cantonese. Reply with ONLY the JSON object.
 - summary: 2-4 sentences on what the video is actually about and its main conclusion or argument.
 - key_points: 3-7 short bullet points with the concrete substance: claims, numbers, names, recommendations,
   predictions, and any dates mentioned. Skip intros, sponsor reads, calls to subscribe, and filler.
@@ -436,7 +438,9 @@ def summarize(cfg, video, now, notes, deferred, progress=None):
     cached = read_json(path, None)
     if cached:
         return cached
-    text, reason = transcript(video["id"], cfg["transcript_languages"])
+    # Chinese channels often upload Cantonese and Traditional tracks too; prefer Simplified Mandarin.
+    languages = CHINESE_CAPTIONS + cfg["transcript_languages"] if CJK.search(video["title"]) else cfg["transcript_languages"]
+    text, reason = transcript(video["id"], languages)
     source = "captions"
     if text is None:
         if progress:

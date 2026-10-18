@@ -177,6 +177,15 @@ class SummarizeTests(unittest.TestCase):
         self.assertEqual(result["source"], "description")
         self.assertEqual(claude.call_args.args[2], "D")
 
+    def test_chinese_title_prefers_simplified_captions(self):
+        now = datetime(2026, 10, 13, 14, tzinfo=timezone.utc)
+        video = {**self.VIDEO, "title": "美股复盘", "published": now.isoformat()}
+        with mock.patch.object(summary, "read_json", return_value=None), mock.patch.object(summary, "atomic_json"), \
+             mock.patch.object(summary, "transcript", return_value=("文字", None)) as transcript, \
+             mock.patch.object(summary, "claude_summary", return_value={"summary": "S", "key_points": []}):
+            summary.summarize({**CFG, "transcript_languages": ["en"]}, video, now, [], [])
+        self.assertEqual(transcript.call_args.args[1][0], "zh-Hans")
+
     def test_transcript_is_preferred(self):
         result, _, claude = self.run_summarize(2, ("hello world", None))
         self.assertEqual(result["source"], "captions")
