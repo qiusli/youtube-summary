@@ -594,10 +594,10 @@ DARK_MODE = """<style>
 @media (prefers-color-scheme: dark) {
   .page { background:#111418 !important; }
   .card { background:#1c2026 !important; border-color:#2c323a !important; }
-  .title { color:#6cb6ff !important; }
+  .title { color:#9fc4cc !important; }
   .text { color:#c9d1d9 !important; }
   .muted { color:#8b949e !important; }
-  .channel { color:#e8ecf1 !important; border-color:#4f8fd6 !important; }
+  .channel { color:#d4a27f !important; border-color:#d4a27f !important; }
 }
 </style>"""
 
@@ -616,15 +616,15 @@ def html_report(report, zone):
             channel = video["channel"]
             count = sum(v["channel"] == channel for v in report["videos"])
             top = 8 if len(body) == 3 else 32
-            body.append(f"<div class='channel' style='margin:{top}px 0 12px;padding-left:10px;border-left:4px solid #2b6cb0;"
-                        f"font-size:19px;font-weight:700;color:#1f2933'>{esc(channel)}"
+            body.append(f"<div class='channel' style='margin:{top}px 0 12px;padding-left:10px;border-left:4px solid #d4a27f;"
+                        f"font-size:19px;font-weight:700;color:#d4a27f'>{esc(channel)}"
                         f"<span class='muted' style='font-size:13px;font-weight:400;color:#7b8794'>&nbsp;·&nbsp;"
                         f"{count} {'个视频' if chinese else ('video' if count == 1 else 'videos')}</span></div>")
         points = "".join(f"<li style='margin:0 0 9px'>{esc(p)}</li>" for p in video["key_points"])
         body.append(
             "<div class='card' style='background:#ffffff;border:1px solid #e3e8ef;border-radius:12px;padding:20px 22px;margin:0 0 14px'>"
             f"<a class='title' href='{esc(video['url'])}' style='font-size:18px;line-height:1.45;font-weight:700;"
-            f"color:#1a66c9;text-decoration:none'>{esc(video['title'])}</a>"
+            f"color:#3d6470;text-decoration:none'>{esc(video['title'])}</a>"
             f"<div class='muted' style='font-size:13px;color:#7b8794;margin:6px 0 14px'>{esc(meta_line(video, zone))}</div>"
             f"<p class='text' style='font-size:16px;line-height:1.75;color:#334e68;margin:0 0 16px'>{esc(video['summary'])}</p>"
             f"<ul class='text' style='font-size:15px;line-height:1.7;color:#334e68;margin:0;padding-left:20px'>{points}</ul>"
