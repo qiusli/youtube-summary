@@ -47,6 +47,7 @@ NS = {"atom": "http://www.w3.org/2005/Atom", "yt": "http://www.youtube.com/xml/s
       "media": "http://search.yahoo.com/mrss/"}
 CHANNEL_ID = re.compile(r"UC[\w-]{22}")
 MAX_TRANSCRIPT_CHARS = 300_000
+CLAUDE_TOKEN = ("YouTube Summary Claude Token", "claude")  # Keychain service, account
 MEMBERS_ONLY = "members-only"
 CJK = re.compile(r"[\u3400-\u9fff]")
 CHINESE_CAPTIONS = ["zh-Hans", "zh-CN", "zh-SG", "zh", "zh-Hant", "zh-TW", "zh-HK"]
@@ -380,6 +381,9 @@ def claude_summary(cfg, video, text, from_transcript):
            "--system-prompt", system_prompt(cfg["summary_language"]), "--tools", "", "--strict-mcp-config",
            "--no-session-persistence", "--json-schema", json.dumps(SCHEMA)]
     env = {k: v for k, v in os.environ.items() if not k.startswith(("CLAUDECODE", "CLAUDE_CODE_"))}
+    token = keychain(*CLAUDE_TOKEN)  # long-lived `claude setup-token`; the login session can expire unattended
+    if token:
+        env["CLAUDE_CODE_OAUTH_TOKEN"] = token
     with tempfile.TemporaryDirectory() as cwd:  # keep project CLAUDE.md/settings out of the call
         proc = subprocess.run(cmd, input=prompt, capture_output=True, text=True, cwd=cwd, env=env,
                               timeout=cfg["timeout_seconds"])
@@ -778,13 +782,11 @@ def configured(args):
     return cfg
 
 
-def store_api_key(cfg):
-    yt = cfg["youtube"]
-    print("Paste your YouTube Data API key at the prompt (input is hidden).")
-    result = subprocess.run(["/usr/bin/security", "add-generic-password", "-U", "-s", yt["keychain_service"],
-                             "-a", yt["keychain_account"], "-w"])
+def store_secret(what, service, account):
+    print(f"Paste your {what} at the prompt (input is hidden).")
+    result = subprocess.run(["/usr/bin/security", "add-generic-password", "-U", "-s", service, "-a", account, "-w"])
     if result.returncode:
-        raise RuntimeError("Keychain did not save the key")
+        raise RuntimeError("Keychain did not save it")
     print("Saved to Keychain.")
 
 
@@ -798,6 +800,7 @@ def main(argv=None):
     mode.add_argument("--daily", action="store_true", help="Email at most once per local date")
     mode.add_argument("--last", action="store_true", help="Show the last saved report")
     mode.add_argument("--set-key", action="store_true", help="Save a YouTube Data API key to Keychain")
+    mode.add_argument("--set-claude-token", action="store_true", help="Save a `claude setup-token` token to Keychain")
     parser.add_argument("--no-color", action="store_true")
     args = parser.parse_args(argv)
     console = Console(no_color=args.no_color, highlight=False)
@@ -806,7 +809,10 @@ def main(argv=None):
             cfg = load_config(args.config)
             render(json.loads((REPORTS / "latest.json").read_text()), console, cfg["timezone"])
         elif args.set_key:
-            store_api_key(load_config(args.config))
+            yt = load_config(args.config)["youtube"]
+            store_secret("YouTube Data API key", yt["keychain_service"], yt["keychain_account"])
+        elif args.set_claude_token:
+            store_secret("Claude token from `claude setup-token`", *CLAUDE_TOKEN)
         elif args.watch:
             watch(args, console)
         else:

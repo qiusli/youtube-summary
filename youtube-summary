@@ -20,15 +20,17 @@ case "${1:-start}" in
     daily)       shift; run --daily "$@" ;;
     last)        shift; run --last "$@" ;;
     key)         shift; run --set-key "$@" ;;
+    claude-token) shift; run --set-claude-token "$@" ;;
     config)      exec "${EDITOR:-open -t}" "$PROJECT_DIR/config.toml" ;;
     help)
-        printf 'Usage: youtube-summary {start|once|email|daily|last|key|config|help}\n'
+        printf 'Usage: youtube-summary {start|once|email|daily|last|key|claude-token|config|help}\n'
         printf '  start        Keep running in this terminal; email daily at send_time\n'
         printf '  once         Print summaries of new videos, no email\n'
         printf '  email        Summarize and email now\n'
         printf '  daily        Email at most once today, then exit\n'
         printf '  last         Show the last saved report\n'
         printf '  key          Save a YouTube Data API key to Keychain\n'
+        printf '  claude-token Save a long-lived token from `claude setup-token` to Keychain\n'
         printf '  config       Open config.toml\n'
         printf '  yts          Short alias for youtube-summary\n'
         ;;

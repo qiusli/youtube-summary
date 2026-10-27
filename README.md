@@ -73,6 +73,20 @@ don't cause misses. Every run saves `reports/latest.html`, `.txt` and `.json`.
 
 The free quota is 10,000 units a day; each channel uses about 2 per run.
 
+## Claude login for unattended runs (recommended)
+
+`claude -p` normally uses your interactive Claude login, which can expire and
+fail to refresh while nobody is at the Mac. Create a token that lasts a year
+and save it to Keychain:
+
+```sh
+claude setup-token
+youtube-summary claude-token
+```
+
+When the token is present it is passed to `claude -p` as
+`CLAUDE_CODE_OAUTH_TOKEN`; otherwise the regular login is used.
+
 ## Verification
 
 ```sh

@@ -8,6 +8,7 @@ subcommands=(
   'daily:Email at most once today, then exit'
   'last:Show the last saved report'
   'key:Save a YouTube Data API key to Keychain'
+  'claude-token:Save a long-lived Claude token to Keychain'
   'config:Open config.toml'
   'help:Show command help'
 )
