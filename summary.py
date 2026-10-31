@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 from contextlib import contextmanager
 from datetime import datetime, time as clock_time, timedelta, timezone
 from email.message import EmailMessage
@@ -251,6 +252,11 @@ def uploads_rss(session, channel):
             time.sleep(2)
 
 
+def quiet_stderr():
+    """yt-dlp prints some warnings (e.g. "Unknown codec") straight to stderr, bypassing its logger."""
+    return contextlib.redirect_stderr(io.StringIO())
+
+
 class QuietLogger:
     """yt-dlp prints errors even when quiet; failures are reported through exceptions instead."""
     def debug(self, message): pass
@@ -263,7 +269,8 @@ def uploads_ytdlp(channel, skip, cache):
     """Latest uploads from the channel's Videos tab (no Shorts or streams); details cached per video."""
     options = {"quiet": True, "no_warnings": True, "skip_download": True, "logger": QuietLogger()}
     with yt_dlp.YoutubeDL({**options, "extract_flat": "in_playlist", "playlistend": 8}) as ydl:
-        listing = ydl.extract_info(f"https://www.youtube.com/channel/{channel['id']}/videos", download=False)
+        with quiet_stderr():
+            listing = ydl.extract_info(f"https://www.youtube.com/channel/{channel['id']}/videos", download=False)
     result = []
     with yt_dlp.YoutubeDL(options) as ydl:
         for entry in listing.get("entries") or []:
@@ -272,7 +279,8 @@ def uploads_ytdlp(channel, skip, cache):
                 continue
             if video_id not in cache:
                 try:
-                    info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
+                    with quiet_stderr():
+                        info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
                 except yt_dlp.utils.DownloadError:
                     continue  # members-only, private or region-locked
                 if not info.get("timestamp"):
@@ -422,7 +430,8 @@ def whisper_transcript(cfg, video):
                        "format": "bestaudio[ext=m4a]/bestaudio", "outtmpl": f"{folder}/audio.%(ext)s"}
             with yt_dlp.YoutubeDL(options) as ydl:
                 try:
-                    ydl.download([f"https://www.youtube.com/watch?v={video['id']}"])
+                    with quiet_stderr():
+                        ydl.download([f"https://www.youtube.com/watch?v={video['id']}"])
                 except yt_dlp.utils.DownloadError as exc:
                     message = str(exc).lower()
                     if "members" in message or "join this channel" in message:
@@ -759,16 +768,26 @@ def wait_until(target):
         time.sleep(min(remaining, 60))  # short sleeps so a Mac waking from sleep catches up promptly
 
 
+def reload(args, cfg, console):
+    """Fresh settings, or the last good ones: a failed read (e.g. macOS revoking folder access) must not stop the loop."""
+    try:
+        return configured(args)
+    except Exception as exc:
+        console.print(Text(f"Couldn't reload {args.config.name} ({exc}); using the last good settings.", style="yellow"))
+        return cfg
+
+
 def watch(args, console):
+    cfg = configured(args)  # a bad config at startup should fail loudly
     while True:
-        cfg = configured(args)
+        cfg = reload(args, cfg, console)
         zone = ZoneInfo(cfg["timezone"])
         target = next_send(datetime.now(zone), cfg, read_json(DATA / "state.json", {}))
         if target > datetime.now(zone):
             console.print(f"Next email: {target.strftime('%A, %B')} {target.day} at {target.strftime('%H:%M')} "
                           f"{cfg['timezone']} · Press Ctrl+C to stop.", style="dim")
             wait_until(target)
-            cfg = configured(args)
+            cfg = reload(args, cfg, console)
         try:
             run_once(cfg, console, send=True, daily=True)
         except Exception as exc:
