@@ -741,14 +741,16 @@ def run_once(cfg, console, send=False, daily=False):
             with console.status("Checking channels…") as status:
                 report = build_report(cfg, state, status.update)
         plain = save_report(report, cfg["timezone"])
-        if not quiet:
-            render(report, console, cfg["timezone"], full=not send)
-        if send:
-            if report["videos"] or cfg["send_when_empty"]:
+        if not send:
+            render(report, console, cfg["timezone"])
+        else:  # emailing: the details are in the email, so the terminal only confirms it
+            stamp = datetime.now(ZoneInfo(cfg["timezone"])).strftime("%Y-%m-%d %H:%M")
+            count = len(report["videos"])
+            if count or cfg["send_when_empty"]:
                 send_report(cfg, report, plain)
-                console.print("Email sent.", style="green")
+                console.print(f"Email sent · {stamp} · {count} {'video' if count == 1 else 'videos'}", style="green")
             else:
-                console.print("No new videos; no email sent.", style="dim")
+                console.print(f"No new videos; no email sent · {stamp}", style="dim")
             record_sent(state, report)
         return True
 
