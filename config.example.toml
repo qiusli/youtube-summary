@@ -6,7 +6,9 @@ channels = [
 
 send_time = "07:00"                 # daily email, local time
 timezone = "America/Vancouver"
-model = "sonnet"                    # claude -p model: haiku | sonnet | opus
+provider = "claude"                 # "claude" (Claude Code CLI) or "gemini" (Gemini API)
+claude_model = "sonnet"             # when provider = "claude": haiku | sonnet | opus
+gemini_model = "gemini-4-hydrogen"  # when provider = "gemini"
 summary_language = "the same language as the video"   # or a fixed language, e.g. "English"
 skip_shorts = true
 send_when_empty = false             # email even when there are no new videos
@@ -20,6 +22,11 @@ whisper_max_minutes = 240           # longer videos wait for captions instead
 whisper_timeout_minutes = 60        # give up on a stuck transcription after this
 claude_path = ""                    # blank = find `claude` on PATH or in the Claude desktop app
 timeout_seconds = 300
+
+[gemini]
+# Leave as is: Keychain lookup names. Save a free key from https://aistudio.google.com/apikey with: youtube-summary gemini-key
+keychain_service = "Gemini API"
+keychain_account = "youtube-summary"
 
 [youtube]
 # Leave as is: Keychain lookup names. Optional key; without it RSS/yt-dlp are used. Save one with: youtube-summary key

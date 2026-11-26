@@ -150,46 +150,118 @@ class SummarizeTests(unittest.TestCase):
              mock.patch.object(summary, "atomic_json"), \
              mock.patch.object(summary, "transcript", return_value=transcript_result), \
              mock.patch.object(summary, "whisper_transcript", return_value=whisper_result), \
-             mock.patch.object(summary, "claude_summary", return_value={"summary": "S", "key_points": []}) as claude:
+             mock.patch.object(summary, "model_summary", return_value={"summary": "S", "key_points": []}) as summarizer:
             result = summary.summarize(cfg, video, now, notes, deferred)
-        return result, deferred, claude
+        return result, deferred, summarizer
 
     def test_missing_captions_are_transcribed_locally(self):
-        result, deferred, claude = self.run_summarize(1, (None, "NoTranscriptFound"), ("spoken words", None))
+        result, deferred, summarizer = self.run_summarize(1, (None, "NoTranscriptFound"), ("spoken words", None))
         self.assertEqual(result["source"], "whisper")
-        self.assertEqual(claude.call_args.args[2], "spoken words")
+        self.assertEqual(summarizer.call_args.args[2], "spoken words")
         self.assertEqual(deferred, [])
 
     def test_members_only_video_is_skipped_not_summarized(self):
-        result, deferred, claude = self.run_summarize(30, (None, "VideoUnplayable"), (None, summary.MEMBERS_ONLY))
+        result, deferred, summarizer = self.run_summarize(30, (None, "VideoUnplayable"), (None, summary.MEMBERS_ONLY))
         self.assertEqual(result, summary.MEMBERS_ONLY)
         self.assertEqual(deferred, [])
-        claude.assert_not_called()
+        summarizer.assert_not_called()
 
     def test_new_video_without_any_transcript_waits(self):
-        result, deferred, claude = self.run_summarize(2, (None, "NoTranscriptFound"))
+        result, deferred, summarizer = self.run_summarize(2, (None, "NoTranscriptFound"))
         self.assertIsNone(result)
         self.assertEqual(len(deferred), 1)
-        claude.assert_not_called()
+        summarizer.assert_not_called()
 
     def test_old_video_without_captions_uses_description(self):
-        result, deferred, claude = self.run_summarize(30, (None, "TranscriptsDisabled"))
+        result, deferred, summarizer = self.run_summarize(30, (None, "TranscriptsDisabled"))
         self.assertEqual(result["source"], "description")
-        self.assertEqual(claude.call_args.args[2], "D")
+        self.assertEqual(summarizer.call_args.args[2], "D")
 
     def test_chinese_title_prefers_simplified_captions(self):
         now = datetime(2026, 10, 13, 14, tzinfo=timezone.utc)
         video = {**self.VIDEO, "title": "美股复盘", "published": now.isoformat()}
         with mock.patch.object(summary, "read_json", return_value=None), mock.patch.object(summary, "atomic_json"), \
              mock.patch.object(summary, "transcript", return_value=("文字", None)) as transcript, \
-             mock.patch.object(summary, "claude_summary", return_value={"summary": "S", "key_points": []}):
+             mock.patch.object(summary, "model_summary", return_value={"summary": "S", "key_points": []}):
             summary.summarize({**CFG, "transcript_languages": ["en"]}, video, now, [], [])
         self.assertEqual(transcript.call_args.args[1][0], "zh-Hans")
 
     def test_transcript_is_preferred(self):
-        result, _, claude = self.run_summarize(2, ("hello world", None))
+        result, _, summarizer = self.run_summarize(2, ("hello world", None))
         self.assertEqual(result["source"], "captions")
-        self.assertEqual(claude.call_args.args[2], "hello world")
+        self.assertEqual(summarizer.call_args.args[2], "hello world")
+
+
+class ProviderTests(unittest.TestCase):
+    VIDEO = {"id": "v", "title": "T", "channel": "C", "published": "2026-10-13T00:00:00Z"}
+    BASE_CFG = {"provider": "claude", "gemini_model": "gemini-4-hydrogen",
+                "claude_model": "sonnet", "summary_language": "English", "timeout_seconds": 60}
+
+    def test_extract_json_handles_fences_and_noise(self):
+        self.assertEqual(summary.extract_json('{"summary": "ok", "key_points": ["a"]}'),
+                         {"summary": "ok", "key_points": ["a"]})
+        self.assertEqual(summary.extract_json('```json\n{"summary": "ok", "key_points": []}\n```'),
+                         {"summary": "ok", "key_points": []})
+        self.assertEqual(summary.extract_json('Note:\n{"response": "hi"}'),
+                         {"response": "hi"})
+
+    def test_model_summary_dispatches_by_provider(self):
+        with mock.patch.object(summary, "gemini_summary", return_value={"summary": "G", "key_points": []}) as gem, \
+             mock.patch.object(summary, "claude_summary", return_value={"summary": "C", "key_points": []}) as cld:
+            self.assertEqual(summary.model_summary({**self.BASE_CFG, "provider": "gemini"}, self.VIDEO, "t", True)["summary"], "G")
+            gem.assert_called_once()
+            self.assertEqual(summary.model_summary({**self.BASE_CFG, "provider": "claude"}, self.VIDEO, "t", True)["summary"], "C")
+            cld.assert_called_once()
+
+    def test_gemini_summary_calls_interactions_api_with_schema(self):
+        fake_interaction = mock.Mock(output_text='{"summary": "Main point.", "key_points": ["Fact 1", 2]}')
+        fake_client = mock.Mock()
+        fake_client.interactions.create.return_value = fake_interaction
+        fake_genai = mock.Mock()
+        fake_genai.Client.return_value = fake_client
+        fake_google = mock.Mock(genai=fake_genai)
+        with mock.patch.object(summary, "gemini_api_key", return_value="test-key"), \
+             mock.patch.dict("sys.modules", {"google": fake_google, "google.genai": fake_genai,
+                                             "google.genai.types": fake_genai.types}):
+            result = summary.gemini_summary(self.BASE_CFG, self.VIDEO, "hello", True)
+        self.assertEqual(result, {"summary": "Main point.", "key_points": ["Fact 1", "2"]})
+        self.assertEqual(fake_genai.Client.call_args.kwargs["api_key"], "test-key")
+        fake_genai.types.HttpRetryOptions.assert_called_once_with(attempts=1)
+        kwargs = fake_client.interactions.create.call_args.kwargs
+        self.assertEqual(kwargs["model"], "gemini-4-hydrogen")
+        self.assertEqual(kwargs["response_format"]["mime_type"], "application/json")
+        self.assertEqual(kwargs["response_format"]["schema"], summary.SCHEMA)
+        self.assertEqual(kwargs["timeout"], 60)
+
+    def test_gemini_summary_requires_api_key(self):
+        with mock.patch.object(summary, "gemini_api_key", return_value=None):
+            with self.assertRaisesRegex(RuntimeError, "Gemini API key unavailable"):
+                summary.gemini_summary(self.BASE_CFG, self.VIDEO, "hello", True)
+
+    def test_claude_summary_parses_structured_output(self):
+        proc = mock.Mock(stdout='{"structured_output": {"summary": "From Claude.", "key_points": ["P1"]}}', stderr="")
+        with mock.patch.object(summary, "find_claude", return_value="/usr/local/bin/claude"), \
+             mock.patch.object(summary, "keychain", return_value=None), \
+             mock.patch.object(summary.subprocess, "run", return_value=proc) as run:
+            result = summary.claude_summary({**self.BASE_CFG, "provider": "claude"}, self.VIDEO, "hello", True)
+        self.assertEqual(result, {"summary": "From Claude.", "key_points": ["P1"]})
+        cmd = run.call_args.args[0]
+        self.assertIn("--model", cmd)
+        self.assertIn("sonnet", cmd)
+
+    def test_provider_defaults_to_claude_and_rejects_unknown(self):
+        example = summary.load_config(summary.ROOT / "config.example.toml")
+        cfg = {**{k: v for k, v in example.items() if k != "provider"}, "channels": ["@x"]}
+        summary.validate(cfg)
+        self.assertEqual(cfg["provider"], "claude")
+        with self.assertRaisesRegex(ValueError, "provider must be one of"):
+            summary.validate({**cfg, "provider": "agy"})
+
+    def test_html_footer_reflects_provider(self):
+        page_gemini = summary.html_report({**ReportTests.REPORT, "provider": "gemini"}, "America/Vancouver")
+        page_claude = summary.html_report({**ReportTests.REPORT, "provider": "claude"}, "America/Vancouver")
+        self.assertIn("Summaries by Gemini", page_gemini)
+        self.assertIn("Summaries by Claude", page_claude)
 
 
 if __name__ == "__main__":

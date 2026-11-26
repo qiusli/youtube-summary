@@ -1,8 +1,8 @@
 # YouTube summary
 
 Emails a daily digest of new videos from the YouTube channels you follow. Each
-video gets a short summary and key points, written by Claude from the video's
-transcript. Everything runs on this Mac.
+video gets a short summary and key points, written by Claude (default) or Gemini
+from the video's transcript. Everything runs on this Mac.
 
 ## Run
 
@@ -20,8 +20,10 @@ youtube-summary once      # Print summaries of new videos; no email
 youtube-summary email     # Summarize and email now
 youtube-summary daily     # Email at most once today, then exit
 youtube-summary last      # Show the last saved report
-youtube-summary key       # Save a YouTube Data API key to Keychain
-youtube-summary config    # Open config.toml
+youtube-summary key          # Save a YouTube Data API key to Keychain
+youtube-summary gemini-key   # Save a Gemini API key to Keychain
+youtube-summary claude-token # Save a Claude setup-token to Keychain
+youtube-summary config       # Open config.toml
 ```
 
 For a new installation use Python 3.11 or newer:
@@ -52,8 +54,9 @@ Changes take effect at the next run.
    (default 24) and is then summarized from its description, labeled "from
    description only". Whisper needs `ffmpeg` (`brew install ffmpeg`); its
    model (~1.6 GB) downloads on first use.
-4. **Summarize.** `claude -p` (your Claude login, no API key) writes the
-   summary. Summaries are cached in `data/summaries/`.
+4. **Summarize.** By default `claude -p` (your Claude login, no API key)
+   writes the summary; set `provider = "gemini"` in `config.toml` to use the
+   Gemini API instead. Summaries are cached in `data/summaries/`.
 5. **Email.** Gmail SMTP, reusing Insider Buy Alert's app password from macOS
    Keychain. Sent video IDs are recorded in `data/state.json` so nothing is
    sent twice. A run with no new videos sends nothing unless
@@ -73,19 +76,23 @@ don't cause misses. Every run saves `reports/latest.html`, `.txt` and `.json`.
 
 The free quota is 10,000 units a day; each channel uses about 2 per run.
 
-## Claude login for unattended runs (recommended)
+## Summarization providers
 
-`claude -p` normally uses your interactive Claude login, which can expire and
-fail to refresh while nobody is at the Mac. Create a token that lasts a year
-and save it to Keychain:
+Set `provider` in `config.toml` to choose how summaries are generated:
 
-```sh
-claude setup-token
-youtube-summary claude-token
-```
+- **`"claude"` (default):** Uses Claude Code CLI (`claude -p`, `claude_model = "sonnet"`).
+  For unattended runs, create a long-lived token and save it to Keychain:
 
-When the token is present it is passed to `claude -p` as
-`CLAUDE_CODE_OAUTH_TOKEN`; otherwise the regular login is used.
+  ```sh
+  claude setup-token
+  youtube-summary claude-token
+  ```
+
+  When the token is present it is passed to `claude -p` as
+  `CLAUDE_CODE_OAUTH_TOKEN`; otherwise your regular Claude login is used.
+- **`"gemini"`:** Uses the Gemini API (`google-genai`, `gemini_model = "gemini-4-hydrogen"`).
+  Create a key in [Google AI Studio](https://aistudio.google.com/apikey) and save
+  it with `youtube-summary gemini-key` (or set `GEMINI_API_KEY`).
 
 ## Verification
 

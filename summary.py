@@ -49,6 +49,8 @@ NS = {"atom": "http://www.w3.org/2005/Atom", "yt": "http://www.youtube.com/xml/s
 CHANNEL_ID = re.compile(r"UC[\w-]{22}")
 MAX_TRANSCRIPT_CHARS = 300_000
 CLAUDE_TOKEN = ("YouTube Summary Claude Token", "claude")  # Keychain service, account
+GEMINI_KEY = ("Gemini API", "youtube-summary")  # default Keychain service, account
+PROVIDERS = ("claude", "gemini")
 MEMBERS_ONLY = "members-only"
 CJK = re.compile(r"[\u3400-\u9fff]")
 CHINESE_CAPTIONS = ["zh-Hans", "zh-CN", "zh-SG", "zh", "zh-Hant", "zh-TW", "zh-HK"]
@@ -66,7 +68,9 @@ SCHEMA = {
 def system_prompt(language):
     return f"""You summarize YouTube videos for a busy reader who will not watch them.
 Write in {language}. Write any Chinese in Simplified Chinese (简体中文), even if the transcript is in
-Traditional Chinese or Cantonese. Reply with ONLY the JSON object.
+Traditional Chinese or Cantonese.
+Reply with ONLY a valid JSON object matching this schema (no markdown code fences, no extra text):
+{{"summary": "<string>", "key_points": ["<string>", ...]}}
 - summary: 2-4 sentences on what the video is actually about and its main conclusion or argument.
 - key_points: 3-7 short bullet points with the concrete substance: claims, numbers, names, recommendations,
   predictions, and any dates mentioned. Skip intros, sponsor reads, calls to subscribe, and filler.
@@ -108,6 +112,10 @@ def validate(cfg):
         raise ValueError("No channels configured; add them to config.toml")
     send_time(cfg)
     ZoneInfo(cfg["timezone"])
+    provider = str(cfg.get("provider", "claude")).strip().lower()
+    if provider not in PROVIDERS:
+        raise ValueError(f"provider must be one of: {', '.join(PROVIDERS)}")
+    cfg["provider"] = provider
     cfg.setdefault("whisper_timeout_minutes", 60)
     for key in ("first_run_hours", "max_lookback_days", "transcript_wait_hours", "timeout_seconds", "whisper_max_minutes",
                 "whisper_timeout_minutes"):
@@ -367,6 +375,70 @@ def transcript(video_id, languages):
         return None, type(exc).__name__
 
 
+def extract_json(text):
+    """Parse a JSON object from text, tolerating markdown fences or surrounding noise."""
+    cleaned = text.strip()
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        pass
+    fence = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", cleaned, re.DOTALL)
+    if fence:
+        try:
+            return json.loads(fence.group(1).strip())
+        except json.JSONDecodeError:
+            pass
+    start, end = cleaned.find("{"), cleaned.rfind("}")
+    if start != -1 and end > start:
+        return json.loads(cleaned[start:end + 1])
+    return json.loads(cleaned)
+
+
+def gemini_keychain(cfg):
+    section = cfg.get("gemini", {})
+    return (section.get("keychain_service") or GEMINI_KEY[0],
+            section.get("keychain_account") or GEMINI_KEY[1])
+
+
+def gemini_api_key(cfg):
+    return os.environ.get("GEMINI_API_KEY") or keychain(*gemini_keychain(cfg))
+
+
+def gemini_summary(cfg, video, text, from_transcript):
+    api_key = gemini_api_key(cfg)
+    if not api_key:
+        raise RuntimeError("Gemini API key unavailable; run `youtube-summary gemini-key` or set GEMINI_API_KEY")
+    from google import genai
+    from google.genai import types
+
+    prompt = (f"Channel: {video['channel']}\nTitle: {video['title']}\nPublished: {video['published']}\n\n"
+              + ("TRANSCRIPT:\n" if from_transcript else "DESCRIPTION (no transcript available):\n") + text)
+    model = cfg.get("gemini_model") or "gemini-4-hydrogen"
+    # No SDK retries: a quota 429 carries a Retry-After of hours, which would hang the run past timeout_seconds.
+    client = genai.Client(api_key=api_key, http_options=types.HttpOptions(retry_options=types.HttpRetryOptions(attempts=1)))
+    interaction = client.interactions.create(
+        model=model,
+        input=prompt,
+        system_instruction=system_prompt(cfg["summary_language"]),
+        response_format={
+            "type": "text",
+            "mime_type": "application/json",
+            "schema": SCHEMA,
+        },
+        timeout=cfg["timeout_seconds"],
+    )
+    raw = interaction.output_text
+    if not isinstance(raw, str) or not raw.strip():
+        raise RuntimeError("Gemini API returned no output text")
+    try:
+        result = extract_json(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Gemini API returned non-JSON summary: {raw[:200]}") from exc
+    if not isinstance(result, dict) or not isinstance(result.get("summary"), str):
+        raise RuntimeError("Gemini API returned no structured summary")
+    return {"summary": result["summary"], "key_points": [str(p) for p in result.get("key_points", [])]}
+
+
 def find_claude(cfg):
     if cfg.get("claude_path"):
         return cfg["claude_path"]
@@ -385,7 +457,8 @@ def find_claude(cfg):
 def claude_summary(cfg, video, text, from_transcript):
     prompt = (f"Channel: {video['channel']}\nTitle: {video['title']}\nPublished: {video['published']}\n\n"
               + ("TRANSCRIPT:\n" if from_transcript else "DESCRIPTION (no transcript available):\n") + text)
-    cmd = [find_claude(cfg), "-p", "--model", cfg["model"], "--output-format", "json",
+    model = cfg.get("claude_model") or cfg.get("model") or "sonnet"
+    cmd = [find_claude(cfg), "-p", "--model", model, "--output-format", "json",
            "--system-prompt", system_prompt(cfg["summary_language"]), "--tools", "", "--strict-mcp-config",
            "--no-session-persistence", "--json-schema", json.dumps(SCHEMA)]
     env = {k: v for k, v in os.environ.items() if not k.startswith(("CLAUDECODE", "CLAUDE_CODE_"))}
@@ -405,6 +478,12 @@ def claude_summary(cfg, video, text, from_transcript):
     if not isinstance(result, dict) or not isinstance(result.get("summary"), str):
         raise RuntimeError("claude CLI returned no structured summary")
     return {"summary": result["summary"], "key_points": [str(p) for p in result.get("key_points", [])]}
+
+
+def model_summary(cfg, video, text, from_transcript):
+    if cfg.get("provider", "claude") == "gemini":
+        return gemini_summary(cfg, video, text, from_transcript)
+    return claude_summary(cfg, video, text, from_transcript)
 
 
 WHISPER_CHILD = """
@@ -479,7 +558,7 @@ def summarize(cfg, video, now, notes, deferred, progress=None):
     if progress:
         progress(f"Summarizing · {video['channel']} · {video['title'][:60]}")
     try:
-        result = claude_summary(cfg, video, text, source != "description")
+        result = model_summary(cfg, video, text, source != "description")
     except Exception as exc:
         notes.append(f"Summary failed for {video['channel']} · {video['title']} ({exc}); will retry next run")
         return None
@@ -531,8 +610,8 @@ def build_report(cfg, state, progress=None):
     videos.sort(key=video_order)
     local = now.astimezone(zone)
     return {"generated_at": local.isoformat(timespec="seconds"), "date": str(local.date()),
-            "channels": len(cfg["channels"]), "videos": videos, "skipped_shorts": skipped,
-            "deferred": deferred, "notes": notes}
+            "channels": len(cfg["channels"]), "provider": cfg.get("provider", "claude"), "videos": videos,
+            "skipped_shorts": skipped, "deferred": deferred, "notes": notes}
 
 
 def is_chinese(video):
@@ -651,7 +730,8 @@ def html_report(report, zone):
             color = "#9a6700" if line.startswith("Data note") else "#7b8794"
             body.append(f"<p class='muted' style='color:{color};font-size:12px;line-height:1.5;margin:3px 0'>{esc(line)}</p>")
         body.append("</div>")
-    body.append("<p class='muted' style='color:#9aa5b1;font-size:12px;margin:22px 0 0'>Summaries by Claude from video transcripts; "
+    provider_name = "Gemini" if report.get("provider") == "gemini" else "Claude"
+    body.append(f"<p class='muted' style='color:#9aa5b1;font-size:12px;margin:22px 0 0'>Summaries by {provider_name} from video transcripts; "
                 "check the video before relying on specific figures.</p></div></div></body></html>")
     return "\n".join(body)
 
@@ -821,6 +901,7 @@ def main(argv=None):
     mode.add_argument("--daily", action="store_true", help="Email at most once per local date")
     mode.add_argument("--last", action="store_true", help="Show the last saved report")
     mode.add_argument("--set-key", action="store_true", help="Save a YouTube Data API key to Keychain")
+    mode.add_argument("--set-gemini-key", action="store_true", help="Save a Gemini API key to Keychain")
     mode.add_argument("--set-claude-token", action="store_true", help="Save a `claude setup-token` token to Keychain")
     parser.add_argument("--no-color", action="store_true")
     args = parser.parse_args(argv)
@@ -832,6 +913,8 @@ def main(argv=None):
         elif args.set_key:
             yt = load_config(args.config)["youtube"]
             store_secret("YouTube Data API key", yt["keychain_service"], yt["keychain_account"])
+        elif args.set_gemini_key:
+            store_secret("Gemini API key", *gemini_keychain(load_config(args.config)))
         elif args.set_claude_token:
             store_secret("Claude token from `claude setup-token`", *CLAUDE_TOKEN)
         elif args.watch:
